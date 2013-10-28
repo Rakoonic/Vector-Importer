@@ -16,11 +16,11 @@ function scene:createScene( event )
 
 	local sceneGroup = self.view
 
-	-- Create the JSON polygon object
+	-- Create the face polygon object
 	local face = polygons:new{
 		file               = "assets/face.json",
 		parent             = sceneGroup,
-		bezierSubdivisions = 10,
+		bezierSubdivisions = 15,
 	}
 
 	-- An example of how to find the center of all what you created
@@ -30,9 +30,11 @@ function scene:createScene( event )
 
 	-- Create the ice cream polygon object
 	local icecream = polygons:new{
-		file               = "assets/icecream.json",
-		parent             = sceneGroup,
-		bezierSubdivisions = 5,
+		file                = "assets/icecream.json",
+		parent              = sceneGroup,
+		bezierSubdivisions  = 5,
+		strokeWidthScalar   = 2,
+		makeOpenShapesLines = true,
 	}
 
 	-- An example of how to find the center of all what you created

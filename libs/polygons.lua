@@ -5,7 +5,7 @@
 local JSON = require( "json" )
 
 -- Set up 
-local class = {}
+local class    = {}
 local class_tm = { __index = class }
 
 local mMin, mMax = math.min, math.max
@@ -43,6 +43,14 @@ function class:new( params )
 
 end
 
+function class:destroy()
+
+	-- Destroy the object
+	self.group:removeSelf()
+	self.group = nil
+
+end
+
 --------------------------------------------------------------
 -- JSON ------------------------------------------------------
 
@@ -56,45 +64,45 @@ function class:loadJSON()
 	local data = JSON.decode( rawData )
 	if data == nil then return false ; end
 
+	-- Set up some values
+	local strokeWidthScalar   = self.strokeWidthScalar or 1
+	local makeOpenShapesLines = self.makeOpenShapesLines or false
+
 	-- Do something with it!
 	for i = 1, #data do
 		local properties = {}
 		local polyData   = data[ i ]
-		local lines      = {}
+		local points     = {}
 		for j = 1, #polyData do
 
 			-- What type of data is this?
 			for k, v in pairs( polyData[ j ] ) do
 				if k == "line" then
 
---[[
 					-- Start if needed
-					if #lines == 0 then
-						lines[ 1 ] = v[ 1 ]
-						lines[ 2 ] = v[ 2 ]
+					if #points == 0 then
+						points[ 1 ] = v[ 1 ]
+						points[ 2 ] = v[ 2 ]
 					end
---]]
 
 					-- End
-					lines[ #lines + 1 ] = v[ 3 ]
-					lines[ #lines + 1 ] = v[ 4 ]
+					points[ #points+ 1 ] = v[ 3 ]
+					points[ #points+ 1 ] = v[ 4 ]
 
 				elseif k == "bezier" then
 
 					-- Subdivide
 					local segs, bounds = self:createBezier( v )
 
---[[
 					-- Start if needed
-					if #lines == 0 then
-						lines[ 1 ] = segs[ 1 ]
-						lines[ 2 ] = segs[ 2 ]
+					if #points == 0 then
+						points[ 1 ] = segs[ 1 ]
+						points[ 2 ] = segs[ 2 ]
 					end
---]]
 
 					-- Adds in the bezier segments except the first point
 					for l = 3, #segs do
-						lines[ #lines + 1 ] = segs[ l ]
+						points[ #points+ 1 ] = segs[ l ]
 					end
 				else
 					properties[ k ] = v
@@ -103,37 +111,61 @@ function class:loadJSON()
 		end
 
 		-- Create the shape if it exists
-		local points = #lines / 2
-		if points >= 2 then
+		if #points >= 4 then
+
+			-- Is this a line or a filled shape?
+			local isLine = false
+			if properties.fill == nil or #points == 4 then isLine = true ; end
+
+			-- Remove last point if it matches
+			if points[ 1 ] == points[ #points - 1 ] and points[ 2 ] == points[ #points ] then
+				table.remove( points, #points )
+				table.remove( points, #points )
+			elseif makeOpenShapesLines == true then
+				properties.fill = nil
+				isLine          = true
+			end
 
 			-- Find the minimum values (else everything ends up in the same damn spot )
-			local xMin, yMin = 1000000000, 1000000000
-			local xMax, yMax = -1000000000, -1000000000
-			for i = 1, points do
-				xMin = mMin( xMin, lines[ i * 2 - 1 ] )
-				yMin = mMin( yMin, lines[ i * 2 ] )
-				xMax = mMax( xMax, lines[ i * 2 - 1 ] )
-				yMax = mMax( yMax, lines[ i * 2 ] )
+			local xMin, yMin = points[ 1 ], points[ 2 ]
+			local xMax, yMax = xMin, yMin
+			for i = 2, #points / 2 do
+				xMin = mMin( xMin, points[ i * 2 - 1 ] )
+				yMin = mMin( yMin, points[ i * 2 ] )
+				xMax = mMax( xMax, points[ i * 2 - 1 ] )
+				yMax = mMax( yMax, points[ i * 2 ] )
 			end
 
 			-- Create the shape
-			local isLine = ( points == 2 )
 			local shape
-			if isLine == true then shape = display.newLine( self.group, lines[ 1 ], lines[ 2 ], lines[ 3 ], lines[ 4 ] )
-			else                   shape = display.newPolygon( self.group, ( xMin + xMax ) / 2, ( yMin + yMax ) / 2, lines ) ; end
+			if isLine == true then
+				shape = display.newLine( self.group, points[ 1 ], points[ 2 ], points[ 3 ], points[ 4 ] )
+				if #points > 4 then
+					local newPoints = {}
+					for j = 5, #points do
+						newPoints[ #newPoints + 1 ] = points[ j ]
+					end
+					shape:append( unpack( newPoints ) )
+				end
+			else            
+				shape = display.newPolygon( self.group, ( xMin + xMax ) / 2, ( yMin + yMax ) / 2, points)
+			end
 
 			-- Store bounds
 			shape.bounds = { xMin = xMin, yMin = yMin, xMax = xMax, yMax = yMax }
 
 			-- Set the fill
-			local color = properties.fill
-			if color then
-				color[ 1 ] = color[ 1 ] / 255
-				color[ 2 ] = color[ 2 ] / 255
-				color[ 3 ] = color[ 3 ] / 255
+			if isLine == false then
+				local color = properties.fill
+				if color then
+					color[ 1 ] = color[ 1 ] / 255
+					color[ 2 ] = color[ 2 ] / 255
+					color[ 3 ] = color[ 3 ] / 255
+					shape:setFillColor( unpack( color ) )
+				else
+					shape.fill = nil
+				end
 			end
-			if isLine == true then shape:setStrokeColor( unpack( color or self.fillColor or { 1, 0, 1 } ) )
-			else                   shape:setFillColor( unpack( color or self.fillColor or { 1, 0, 1 } ) ) ; end
 
 			-- Set the stroke
 			local color = properties.stroke
@@ -141,10 +173,14 @@ function class:loadJSON()
 				color[ 1 ] = color[ 1 ] / 255
 				color[ 2 ] = color[ 2 ] / 255
 				color[ 3 ] = color[ 3 ] / 255
+				if isLine then
+					shape.strokeWidth = properties.strokeWidth * strokeWidthScalar or 0
+					shape:setStrokeColor( unpack( color ) )
+				else
+				    shape.strokeWidth = properties.strokeWidth * strokeWidthScalar or 0
+					shape:setStrokeColor( unpack( color ) )
+				end
 			end
-			shape:setStrokeColor( unpack( color or self.strokeColor or { 1, 1, 1 } ) )
-			if isLine then shape.width       = properties.strokeWidth or self.strokeWidth or 0
-			else           shape.strokeWidth = properties.strokeWidth or self.strokeWidth or 0 ; end
 
 			-- Set the alpha
 			local opacity = properties.opacity
@@ -152,6 +188,9 @@ function class:loadJSON()
 			shape.alpha = opacity or self.alpha or 1
 		end
 	end
+
+	-- Show how many sub-objects in this file
+	print( "# OF SUB-OBJECTS", self.file, #data )
 
 	-- Create the bounds
 	self:setbounds()
